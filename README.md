@@ -32,14 +32,14 @@ Your AWS credentials need permissions for:
 ### Quick Install
 
 ```bash
-pip install git+https://github.com/moritalous/s3-vectors-mcp.git
+pip install git+https://github.com/ronamosa/s3-vectors-mcp.git
 ```
 
 ### Development Install
 
 ```bash
 # Clone the repository
-git clone https://github.com/moritalous/s3-vectors-mcp.git
+git clone https://github.com/ronamosa/s3-vectors-mcp.git
 cd s3-vectors-mcp
 
 # Install with uv (recommended)
@@ -198,6 +198,20 @@ For Claude Desktop, add to your MCP client configuration:
 - `docs/claude/claude-code.json`: drop-in MCP config for Claude Desktop / Claude Code
 - `docs/claude/claude-cli.json`: sample `.claude/config.json` block for the Claude CLI
 - Both samples assume you run `uv run s3-vectors-mcp serve` and override secrets via your shell profile
+- `docs/claude/claude-mcp-add.md`: step-by-step instructions for `claude mcp add ...` so you can register this server with Claude CLI in seconds
+
+#### One-liner Claude CLI registration
+
+```bash
+export S3VECTORS_BUCKET_NAME="my-vectors-bucket"
+export S3VECTORS_INDEX_NAME="my-index"
+export S3VECTORS_MODEL_ID="amazon.titan-embed-text-v2:0"
+export S3VECTORS_REGION="us-east-1"
+claude mcp add s3vectors -- uv run s3-vectors-mcp serve --transport stdio
+```
+
+- Add `-s user` if you want the MCP server registered globally (`claude mcp add s3vectors -s user -- ...`)
+- Run `claude mcp list` to verify the server is available, then start Claude (`claude`) and run `/mcp` to load the tools
 
 ## Available Tools
 

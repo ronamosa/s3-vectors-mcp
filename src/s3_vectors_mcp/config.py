@@ -21,7 +21,8 @@ def _require(env: Mapping[str, str], key: str) -> str:
     value = env.get(key)
     if not value:
         raise MissingSettingError(
-            f"{key} must be provided via environment variable or runtime override"
+            f"{key} must be provided via environment variable "
+            "or runtime override"
         )
     return value
 
