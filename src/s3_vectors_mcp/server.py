@@ -144,9 +144,10 @@ async def ensure_index_exists(
     client = session.client("s3vectors")
     try:
         await anyio.to_thread.run_sync(
-            client.describe_index,
-            vectorBucketName=settings.bucket_name,
-            indexName=settings.index_name,
+            lambda: client.describe_index(
+                vectorBucketName=settings.bucket_name,
+                indexName=settings.index_name,
+            )
         )
         return
     except Exception as exc:
@@ -165,11 +166,12 @@ async def ensure_index_exists(
         f"Creating index {settings.index_name} (bucket {settings.bucket_name})",
     )
     await anyio.to_thread.run_sync(
-        client.create_index,
-        vectorBucketName=settings.bucket_name,
-        indexName=settings.index_name,
-        dimensionCount=settings.dimensions,
-        vectorDataType="float32",
+        lambda: client.create_index(
+            vectorBucketName=settings.bucket_name,
+            indexName=settings.index_name,
+            dimensionCount=settings.dimensions,
+            vectorDataType="float32",
+        )
     )
 
 
@@ -219,10 +221,11 @@ async def upload_vector_batches(
             message="Uploading vectors",
         )
         response = await anyio.to_thread.run_sync(
-            client.put_vectors,
-            vectorBucketName=settings.bucket_name,
-            indexName=settings.index_name,
-            vectors=batch,
+            lambda: client.put_vectors(
+                vectorBucketName=settings.bucket_name,
+                indexName=settings.index_name,
+                vectors=batch,
+            )
         )
         failed = response.get("failedItems") if isinstance(response, dict) else None
         if failed:
