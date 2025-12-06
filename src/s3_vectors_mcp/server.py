@@ -602,8 +602,7 @@ async def s3vectors_ingest_pdf(
     session = get_cached_session(settings.profile, settings.region)
     bedrock_service = BedrockService(session, settings.region, debug=False)
 
-    if create_index:
-        await ensure_index_exists(session, settings, True, context)
+    await ensure_index_exists(session, settings, create_index, context)
 
     embeddings = await embed_chunks(chunks, bedrock_service, settings, context)
 
@@ -614,15 +613,18 @@ async def s3vectors_ingest_pdf(
         vectors, session, settings, context, batch_size=batch_size
     )
 
+    failures = upload_summary.get("failed") or []
+    success = len(failures) == 0
+
     return {
-        "success": True,
+        "success": success,
         "pdf": str(pdf),
         "topic": topic,
         "bucket": settings.bucket_name,
         "index": settings.index_name,
         "chunks": len(chunks),
         "uploaded": upload_summary["uploaded"],
-        "failed": upload_summary["failed"],
+        "failed": failures,
     }
 
 
