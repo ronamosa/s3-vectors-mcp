@@ -10,6 +10,7 @@ license = { text = "MIT" }
 dependencies = [
     "mcp>=1.12.2",
     "s3vectors-embed-cli>=0.1.1",
+    "PyPDF2>=3.0.1",
 ]
 
 [project.scripts]

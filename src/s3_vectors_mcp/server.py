@@ -28,9 +28,10 @@ import argparse
 import json
 import logging
 import os
+from pathlib import Path
 import sys
 import uuid
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import anyio
 import boto3
@@ -42,6 +43,7 @@ from .config import (
     Settings,
     settings_from_env_with_overrides,
 )
+from .ingest import build_vector_payloads, chunk_text, extract_text
 
 # Configure logging
 def configure_logging(level_name: Optional[str] = None) -> None:
@@ -131,6 +133,101 @@ async def send_progress(
 ) -> None:
     if context:
         await context.report_progress(progress, total, message)
+
+
+async def ensure_index_exists(
+    session: boto3.Session,
+    settings: Settings,
+    create_if_missing: bool,
+    context: Optional[Context],
+) -> None:
+    client = session.client("s3vectors")
+    try:
+        await anyio.to_thread.run_sync(
+            client.describe_index,
+            vectorBucketName=settings.bucket_name,
+            indexName=settings.index_name,
+        )
+        return
+    except Exception as exc:
+        if not create_if_missing:
+            raise ValueError(
+                f"Index {settings.index_name} not found in {settings.bucket_name}: {exc}"
+            ) from exc
+
+    if not settings.dimensions:
+        raise ValueError(
+            "S3VECTORS_DIMENSIONS must be set to create a new index automatically"
+        )
+
+    await send_info(
+        context,
+        f"Creating index {settings.index_name} (bucket {settings.bucket_name})",
+    )
+    await anyio.to_thread.run_sync(
+        client.create_index,
+        vectorBucketName=settings.bucket_name,
+        indexName=settings.index_name,
+        dimensionCount=settings.dimensions,
+        vectorDataType="float32",
+    )
+
+
+async def embed_chunks(
+    chunks: List[Any],
+    bedrock_service: BedrockService,
+    settings: Settings,
+    context: Optional[Context],
+) -> List[List[float]]:
+    embeddings: List[List[float]] = []
+    total = len(chunks)
+    for idx, chunk in enumerate(chunks):
+        await send_info(context, f"Embedding chunk {idx + 1}/{total}")
+        await send_progress(
+            context,
+            10 + (idx / max(total, 1)) * 50,
+            message="Generating embeddings",
+        )
+        embedding = await anyio.to_thread.run_sync(
+            bedrock_service.embed_text,
+            settings.model_id,
+            chunk.text[:4000],
+            settings.dimensions,
+        )
+        embeddings.append(embedding)
+    return embeddings
+
+
+async def upload_vector_batches(
+    vectors: List[dict],
+    session: boto3.Session,
+    settings: Settings,
+    context: Optional[Context],
+    batch_size: int = 200,
+) -> Dict[str, Any]:
+    client = session.client("s3vectors")
+    failures = []
+    total = len(vectors)
+    for idx in range(0, total, batch_size):
+        batch = vectors[idx : idx + batch_size]
+        await send_info(
+            context, f"Uploading batch {idx // batch_size + 1} ({len(batch)} vectors)"
+        )
+        await send_progress(
+            context,
+            60 + (idx / max(total, 1)) * 40,
+            message="Uploading vectors",
+        )
+        response = await anyio.to_thread.run_sync(
+            client.put_vectors,
+            vectorBucketName=settings.bucket_name,
+            indexName=settings.index_name,
+            vectors=batch,
+        )
+        failed = response.get("failedItems") if isinstance(response, dict) else None
+        if failed:
+            failures.extend(failed)
+    return {"uploaded": total, "failed": failures}
 
 
 @mcp.tool()
@@ -451,6 +548,82 @@ async def s3vectors_query(
             "operation": "s3vectors_query",
         }
         return error_result
+
+
+@mcp.tool()
+async def s3vectors_ingest_pdf(
+    pdf_path: str,
+    topic: str,
+    vault_root: Optional[str] = None,
+    chunk_size: int = 500,
+    chunk_overlap: int = 50,
+    bucket_name: Optional[str] = None,
+    index_name: Optional[str] = None,
+    model_id: Optional[str] = None,
+    region: Optional[str] = None,
+    profile: Optional[str] = None,
+    dimensions: Optional[int] = None,
+    create_index: bool = False,
+    batch_size: int = 200,
+    context: Optional[Context] = None,
+) -> Dict[str, Any]:
+    """
+    Ingest a local PDF into S3 Vectors by extracting, chunking, embedding, and uploading.
+    """
+
+    pdf = Path(pdf_path).expanduser().resolve()
+    if not pdf.exists() or pdf.suffix.lower() != ".pdf":
+        raise ValueError(f"PDF not found: {pdf}")
+
+    settings = resolve_settings(
+        bucket_name=bucket_name,
+        index_name=index_name,
+        model_id=model_id,
+        region=region,
+        profile=profile,
+        dimensions=dimensions,
+    )
+
+    await send_info(
+        context,
+        f"Ingesting {pdf.name} into {settings.bucket_name}/{settings.index_name}",
+    )
+
+    text = await anyio.to_thread.run_sync(extract_text, pdf)
+    if not text.strip():
+        raise ValueError(f"No text extracted from {pdf}")
+
+    chunks = chunk_text(text, chunk_size, chunk_overlap)
+    if not chunks:
+        raise ValueError("PDF produced zero chunks; adjust chunk_size/overlap")
+
+    await send_info(context, f"Chunked into {len(chunks)} segments")
+
+    session = get_cached_session(settings.profile, settings.region)
+    bedrock_service = BedrockService(session, settings.region, debug=False)
+
+    if create_index:
+        await ensure_index_exists(session, settings, True, context)
+
+    embeddings = await embed_chunks(chunks, bedrock_service, settings, context)
+
+    root_path = Path(vault_root).expanduser().resolve() if vault_root else pdf.parent
+    vectors = build_vector_payloads(pdf, topic, chunks, embeddings, root_path)
+
+    upload_summary = await upload_vector_batches(
+        vectors, session, settings, context, batch_size=batch_size
+    )
+
+    return {
+        "success": True,
+        "pdf": str(pdf),
+        "topic": topic,
+        "bucket": settings.bucket_name,
+        "index": settings.index_name,
+        "chunks": len(chunks),
+        "uploaded": upload_summary["uploaded"],
+        "failed": upload_summary["failed"],
+    }
 
 
 def serve(transport: str = "stdio", log_level: Optional[str] = None) -> None:

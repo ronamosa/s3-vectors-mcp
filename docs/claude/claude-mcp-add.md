@@ -28,6 +28,7 @@ claude mcp add s3vectors -s user -- uv run s3-vectors-mcp serve --transport stdi
 claude mcp list
 claude mcp info s3vectors
 claude mcp call s3vectors s3vectors_query -- --help
+claude mcp call s3vectors s3vectors_ingest_pdf -- --help
 ```
 
 4. Start Claude CLI (`claude`) or Claude Code and run `/mcp` to load the new tools. The server command will reuse the environment variables you exported in step 1.

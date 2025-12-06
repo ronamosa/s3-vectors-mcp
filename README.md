@@ -13,6 +13,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that pr
 - **Multiple Transports**: Support for stdio, Server-Sent Events (SSE), and StreamableHTTP
 - **Flexible Configuration**: Environment variable and parameter-based configuration
 - **Claude-first CLI**: `serve`, `put`, and `query` commands tuned for Claude Code & Claude CLI
+- **Local PDF Ingest**: Single command to extract, chunk, embed, and upload PDFs to S3 Vectors
 
 ## Prerequisites
 
@@ -108,6 +109,14 @@ uv run s3-vectors-mcp query \
   --top-k 5 \
   --bucket-name my-bucket \
   --index-name my-index
+
+# Ingest a PDF (extract + chunk + embed + upload)
+uv run s3-vectors-mcp ingest-pdf \
+  --pdf-path ~/Documents/notes/architecture.pdf \
+  --topic "notebook" \
+  --create-index \
+  --bucket-name my-bucket \
+  --index-name design-notes
 ```
 
 ### Configuration Precedence
@@ -261,6 +270,31 @@ Query for similar vectors in S3 Vectors.
   },
   "return_metadata": true,
   "return_distance": true
+}
+```
+
+### s3vectors_ingest_pdf
+
+Extract, chunk, embed, and upload a local PDF file in one go.
+
+**Parameters:**
+- `pdf_path` (string, required): Absolute or relative path to the PDF on disk
+- `topic` (string, required): Logical grouping stored in metadata
+- `vault_root` (string, optional): Root path used for relative `vault_path` metadata
+- `chunk_size` / `chunk_overlap` (integers, optional): Word chunking controls (default 500/50)
+- `bucket_name`/`index_name`/`model_id`: Optional overrides for destination configuration
+- `create_index` (bool, optional): Set `true` to create the index if it does not exist (requires `S3VECTORS_DIMENSIONS`)
+- `batch_size` (integer, optional): Number of vectors per upload batch (default 200)
+
+**Example:**
+```json
+{
+  "pdf_path": "/Users/ramosa/Documents/notes/design.pdf",
+  "topic": "work-notes",
+  "index_name": "design-notes",
+  "create_index": true,
+  "chunk_size": 400,
+  "chunk_overlap": 60
 }
 ```
 
