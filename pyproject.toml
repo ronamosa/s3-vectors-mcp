@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-s3-vectors-mcp = "s3_vectors_mcp:main"
+s3-vectors-mcp = "s3_vectors_mcp.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -25,7 +25,8 @@ packages = ["src/s3_vectors_mcp"]
 [dependency-groups]
 dev = [
     "ruff>=0.12.5",
+    "pytest>=8.3.0",
 ]
 
 [tool.uv]
-dev-dependencies = ["ruff>=0.7.3"]
+dev-dependencies = ["ruff>=0.7.3", "pytest>=8.3.0"]
