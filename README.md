@@ -1,8 +1,6 @@
 # S3 Vectors MCP Server
 
 > [!NOTE]
-> This README was generated with Amazon Q Developer.
->
 > This fork is explicitly Claude Code & Claude CLI-first. Every change is prioritized to make it easy to wire the MCP server into Anthropic's IDE and CLI clients while still working with other MCP-compatible tooling.
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that provides tools for interacting with AWS S3 Vectors service. This server enables AI assistants to embed text using Amazon Bedrock models and store/query vector embeddings in S3 Vectors indexes.
