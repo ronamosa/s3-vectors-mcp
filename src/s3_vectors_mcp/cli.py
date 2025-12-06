@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 
 import anyio
 
+from . import __version__
 from .server import serve, s3vectors_ingest_pdf, s3vectors_put, s3vectors_query
 
 CONFIG_ARGS = [
@@ -57,7 +58,12 @@ def build_parser() -> argparse.ArgumentParser:
         prog="s3-vectors-mcp",
         description="Claude Code/CLI-focused MCP server for Amazon S3 Vectors",
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument(
+        "--version",
+        action="store_true",
+        help="Print version and exit",
+    )
+    subparsers = parser.add_subparsers(dest="command")
 
     # serve command
     serve_parser = subparsers.add_parser("serve", help="Run the MCP server")
@@ -202,6 +208,13 @@ async def run_ingest(args: argparse.Namespace) -> int:
 def main(argv: Optional[list[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if getattr(args, "version", False):
+        print(__version__)
+        return 0
+
+    if not getattr(args, "command", None):
+        parser.error("command is required")
 
     if args.command == "serve":
         update_env_from_args(args)
