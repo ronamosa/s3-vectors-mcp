@@ -32,8 +32,9 @@ import sys
 import uuid
 from typing import Any, Dict, Optional, Tuple
 
+import anyio
 import boto3
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from s3vectors.core.services import BedrockService, S3VectorService
 from s3vectors.utils.config import get_region
 from .config import (
@@ -114,8 +115,25 @@ def serialize_filter_expression(
         raise ValueError("filter_expr must be JSON-serializable") from exc
 
 
+async def send_info(context: Optional[Context], message: str) -> None:
+    if context:
+        await context.info(message)
+
+
+async def send_error(context: Optional[Context], message: str) -> None:
+    if context:
+        await context.error(message)
+
+
+async def send_progress(
+    context: Optional[Context], progress: float, total: float = 100, message: Optional[str] = None
+) -> None:
+    if context:
+        await context.report_progress(progress, total, message)
+
+
 @mcp.tool()
-def s3vectors_put(
+async def s3vectors_put(
     text: str,
     vector_id: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
@@ -125,7 +143,8 @@ def s3vectors_put(
     region: Optional[str] = None,
     profile: Optional[str] = None,
     dimensions: Optional[int] = None,
-) -> str:
+    context: Optional[Context] = None,
+) -> Dict[str, Any]:
     """
     Embed text and store as vector in S3 Vectors.
 
@@ -141,15 +160,12 @@ def s3vectors_put(
         text: Text to embed and store
         vector_id: Optional vector ID (auto-generated if not provided)
         metadata: Optional metadata to store with the vector
+        bucket_name/index_name/model_id: Optional overrides for destination resources
+        region/profile/dimensions: Optional overrides for AWS settings
+        context: Optional MCP context for streaming updates
 
     Returns:
-        JSON string with operation result
-        bucket_name: Optional override for S3 bucket
-        index_name: Optional override for index name
-        model_id: Optional override for embedding model
-        region: Optional AWS region override
-        profile: Optional AWS profile override
-        dimensions: Optional override for embedding dimensions
+        Dict with operation result metadata
     """
     logger.info(
         f"s3vectors_put called with text_length={len(text)}, vector_id={vector_id}, has_metadata={metadata is not None}"
@@ -167,15 +183,11 @@ def s3vectors_put(
             dimensions=dimensions,
         )
 
-        logger.info(
-            "Configuration resolved bucket=%s index=%s model=%s region=%s profile=%s dims=%s",
-            settings.bucket_name,
-            settings.index_name,
-            settings.model_id,
-            settings.region,
-            settings.profile,
-            settings.dimensions,
+        await send_info(
+            context,
+            f"Resolved config bucket={settings.bucket_name} index={settings.index_name} model={settings.model_id}",
         )
+        await send_progress(context, 10, message="Configuration resolved")
 
         # Set defaults
         if vector_id is None:
@@ -184,6 +196,7 @@ def s3vectors_put(
             metadata = {}
 
         logger.info(f"Using vector_id={vector_id}")
+        await send_info(context, f"Using vector_id={vector_id}")
 
         # Initialize AWS session and services
         logger.info("Initializing AWS session and services...")
@@ -192,17 +205,21 @@ def s3vectors_put(
         s3vector_service = S3VectorService(session, settings.region, debug=False)
 
         # Generate embedding
-        logger.info(
-            "Generating embedding for text with model %s...", settings.model_id
-        )
-        embedding = bedrock_service.embed_text(
-            settings.model_id, text, settings.dimensions
+        await send_info(context, "Generating embedding with Bedrock")
+        await send_progress(context, 30, message="Generating embedding")
+        embedding = await anyio.to_thread.run_sync(
+            bedrock_service.embed_text,
+            settings.model_id,
+            text,
+            settings.dimensions,
         )
         logger.info(f"Generated embedding with {len(embedding)} dimensions")
+        await send_progress(context, 60, message="Embedding generated")
 
         # Store vector
-        logger.info("Storing vector in S3 Vectors...")
-        result_vector_id = s3vector_service.put_vector(
+        await send_info(context, "Storing vector in S3 Vectors")
+        result_vector_id = await anyio.to_thread.run_sync(
+            s3vector_service.put_vector,
             bucket_name=settings.bucket_name,
             index_name=settings.index_name,
             vector_id=vector_id,
@@ -210,6 +227,7 @@ def s3vectors_put(
             metadata=metadata,
         )
         logger.info(f"Successfully stored vector with ID: {result_vector_id}")
+        await send_progress(context, 90, message="Vector stored")
 
         # Prepare result
         result = {
@@ -226,16 +244,19 @@ def s3vectors_put(
         }
 
         logger.info("s3vectors_put completed successfully")
-        return json.dumps(result, indent=2)
+        await send_progress(context, 100, message="Completed vector storage")
+        await send_info(context, "Vector stored successfully")
+        return result
 
     except Exception as e:
         logger.error(f"Error in s3vectors_put: {str(e)}", exc_info=True)
+        await send_error(context, f"s3vectors_put failed: {e}")
         error_result = {"success": False, "error": str(e), "operation": "s3vectors_put"}
-        return json.dumps(error_result, indent=2)
+        return error_result
 
 
 @mcp.tool()
-def s3vectors_query(
+async def s3vectors_query(
     query_text: str,
     top_k: int = 10,
     filter_expr: Optional[Dict[str, Any]] = None,
@@ -247,7 +268,8 @@ def s3vectors_query(
     region: Optional[str] = None,
     profile: Optional[str] = None,
     dimensions: Optional[int] = None,
-) -> str:
+    context: Optional[Context] = None,
+) -> Dict[str, Any]:
     """
     Query for similar vectors in S3 Vectors.
 
@@ -265,6 +287,9 @@ def s3vectors_query(
         filter_expr: Optional metadata filter expression (JSON format)
         return_metadata: Include metadata in results (default: True)
         return_distance: Include similarity distance in results (default: False)
+        bucket_name/index_name/model_id: Optional overrides for S3 resources
+        region/profile/dimensions: Optional overrides for AWS settings
+        context: Optional MCP context for streaming updates
 
     Filter Expression (filter_expr):
         Supports AWS S3 Vectors API operators for metadata-based filtering.
@@ -308,8 +333,7 @@ def s3vectors_query(
         - Use proper JSON format with double quotes for keys and string values
 
     Returns:
-        JSON string with query results
-        bucket_name/index_name/model_id/region/profile/dimensions: Optional overrides
+        Dict with query results
     """
     logger.info(
         f"s3vectors_query called with query_text_length={len(query_text)}, top_k={top_k}, has_filter={filter_expr is not None}, return_metadata={return_metadata}, return_distance={return_distance}"
@@ -327,15 +351,11 @@ def s3vectors_query(
             dimensions=dimensions,
         )
 
-        logger.info(
-            "Configuration resolved bucket=%s index=%s model=%s region=%s profile=%s dims=%s",
-            settings.bucket_name,
-            settings.index_name,
-            settings.model_id,
-            settings.region,
-            settings.profile,
-            settings.dimensions,
+        await send_info(
+            context,
+            f"Resolved config bucket={settings.bucket_name} index={settings.index_name} model={settings.model_id}",
         )
+        await send_progress(context, 5, message="Configuration resolved")
 
         # Initialize AWS session and services
         logger.info("Initializing AWS session and services...")
@@ -344,13 +364,16 @@ def s3vectors_query(
         s3vector_service = S3VectorService(session, settings.region, debug=False)
 
         # Generate query embedding
-        logger.info(
-            "Generating query embedding for text with model %s...", settings.model_id
-        )
-        query_embedding = bedrock_service.embed_text(
-            settings.model_id, query_text, settings.dimensions
+        await send_info(context, "Generating query embedding with Bedrock")
+        await send_progress(context, 20, message="Generating query embedding")
+        query_embedding = await anyio.to_thread.run_sync(
+            bedrock_service.embed_text,
+            settings.model_id,
+            query_text,
+            settings.dimensions,
         )
         logger.info(f"Generated query embedding with {len(query_embedding)} dimensions")
+        await send_progress(context, 40, message="Query embedding generated")
 
         # Prepare query parameters
         query_params = {
@@ -368,11 +391,15 @@ def s3vectors_query(
             query_params["filter_expr"] = filter_expr_str
 
         logger.info(f"Query parameters: {query_params}")
-        logger.info("Calling s3vector_service.query_vectors...")
+        await send_info(context, f"Searching for top {top_k} matches")
 
         # Perform vector search
-        search_results = s3vector_service.query_vectors(**query_params)
+        search_results = await anyio.to_thread.run_sync(
+            s3vector_service.query_vectors,
+            **query_params,
+        )
         logger.info(f"Query completed successfully. Raw results: {search_results}")
+        await send_progress(context, 80, message="Query completed")
 
         # Format results
         formatted_results = []
@@ -386,12 +413,12 @@ def s3vectors_query(
                 formatted_result["metadata"] = result.get("metadata", {})
 
             if return_distance and "similarity" in result:
-                # S3VectorService returns 'similarity' which is the distance/score
                 formatted_result["distance"] = result.get("similarity")
 
             formatted_results.append(formatted_result)
 
         logger.info(f"Formatted {len(formatted_results)} results")
+        await send_progress(context, 100, message="Results ready")
 
         # Prepare response
         response = {
@@ -412,16 +439,17 @@ def s3vectors_query(
         }
 
         logger.info("s3vectors_query completed successfully")
-        return json.dumps(response, indent=2)
+        return response
 
     except Exception as e:
         logger.error(f"Error in s3vectors_query: {str(e)}", exc_info=True)
+        await send_error(context, f"s3vectors_query failed: {e}")
         error_result = {
             "success": False,
             "error": str(e),
             "operation": "s3vectors_query",
         }
-        return json.dumps(error_result, indent=2)
+        return error_result
 
 
 def serve(transport: str = "stdio") -> None:

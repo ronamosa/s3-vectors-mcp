@@ -2,6 +2,8 @@
 
 > [!NOTE]
 > This README was generated with Amazon Q Developer.
+>
+> This fork is explicitly Claude Code & Claude CLI-first. Every change is prioritized to make it easy to wire the MCP server into Anthropic's IDE and CLI clients while still working with other MCP-compatible tooling.
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that provides tools for interacting with AWS S3 Vectors service. This server enables AI assistants to embed text using Amazon Bedrock models and store/query vector embeddings in S3 Vectors indexes.
 
@@ -12,6 +14,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that pr
 - **Similarity Search**: Query for similar vectors with advanced filtering capabilities
 - **Multiple Transports**: Support for stdio, Server-Sent Events (SSE), and StreamableHTTP
 - **Flexible Configuration**: Environment variable and parameter-based configuration
+- **Claude-first CLI**: `serve`, `put`, and `query` commands tuned for Claude Code & Claude CLI
 
 ## Prerequisites
 
@@ -60,6 +63,7 @@ The server uses environment variables for configuration:
 | `S3VECTORS_DIMENSIONS` | No | Embedding dimensions | `1024` |
 | `S3VECTORS_REGION` | No | AWS region | `us-east-1` |
 | `S3VECTORS_PROFILE` | No | AWS profile name | `default` |
+| `S3VECTORS_LOG_LEVEL` | No | Server log level (`DEBUG`, `INFO`, etc.) | `INFO` |
 
 ### Example Configuration
 
@@ -75,30 +79,55 @@ export S3VECTORS_REGION="us-east-1"
 
 ### Running the Server
 
-The server supports three transport modes:
+The Claude-first CLI exposes the `serve` subcommand with the same transports as FastMCP:
 
 ```bash
-# Using stdio transport (default, for MCP clients)
-uv run s3-vectors-mcp stdio
+# Using stdio transport (default for Claude Code)
+uv run s3-vectors-mcp serve --transport stdio
 
 # Using Server-Sent Events
-uv run s3-vectors-mcp sse
+uv run s3-vectors-mcp serve --transport sse
 
 # Using StreamableHTTP
-uv run s3-vectors-mcp streamable-http
+uv run s3-vectors-mcp serve --transport streamable-http
 ```
+
+### Command-Line Vector Operations
+
+Embed or query vectors directly from the CLI without starting a long-lived MCP process:
+
+```bash
+# Store a vector
+uv run s3-vectors-mcp put \
+  --text "This repo is optimized for Claude Code and CLI" \
+  --bucket-name my-bucket \
+  --index-name my-index \
+  --model-id amazon.titan-embed-text-v2:0
+
+# Query similar vectors
+uv run s3-vectors-mcp query \
+  --query-text "Claude developer workflow" \
+  --top-k 5 \
+  --bucket-name my-bucket \
+  --index-name my-index
+```
+
+### Configuration Precedence
+
+1. CLI arguments (`--bucket-name`, `--model-id`, etc.)
+2. Environment variables (`S3VECTORS_*`)
+3. Defaults (region detection via AWS config, INFO log level)
+
+This makes it easy to keep multiple Claude Code workspaces pointed at different datasets without constantly rewriting env files.
 
 ### Development Mode
 
 ```bash
-# With uv (using Python module)
-uv run python -m s3_vectors_mcp stdio
+# Run the CLI via module entry point
+uv run python -m s3_vectors_mcp serve --transport stdio
 
-# With uv (using script entry point)
-uv run s3-vectors-mcp stdio
-
-# With pip (if installed globally)
-s3-vectors-mcp stdio
+# Direct CLI install (e.g., pipx)
+s3-vectors-mcp serve --transport stdio
 ```
 
 ### MCP Client Integration
@@ -114,7 +143,8 @@ For Amazon Q Developer, create or update your MCP configuration file (`.amazonq/
       "command": "uv",
       "args": [
         "run",
-        "s3-vectors-mcp"
+        "s3-vectors-mcp",
+        "serve"
       ],
       "env": {
         "S3VECTORS_BUCKET_NAME": "your-vectors-bucket",
@@ -141,7 +171,8 @@ For Claude Desktop, add to your MCP client configuration:
       "command": "uv",
       "args": [
         "run",
-        "s3-vectors-mcp"
+        "s3-vectors-mcp",
+        "serve"
       ],
       "env": {
         "S3VECTORS_BUCKET_NAME": "your-vectors-bucket",
@@ -155,12 +186,20 @@ For Claude Desktop, add to your MCP client configuration:
 }
 ```
 
+> Need ready-to-drop configs? See `docs/claude/claude-code.json` for Claude Code/Desktop and `docs/claude/claude-cli.json` for Anthropic's CLI format.
+
 #### Configuration Notes
 
 - Replace `your-vectors-bucket` and `your-index` with your actual S3 bucket and index names
 - The `timeout` setting (120000ms = 2 minutes) allows for longer embedding operations
 - Set `disabled: false` to enable the server
 - The `uv run` command assumes you have the project installed in development mode
+
+### Claude Code & Claude CLI Quick Start
+
+- `docs/claude/claude-code.json`: drop-in MCP config for Claude Desktop / Claude Code
+- `docs/claude/claude-cli.json`: sample `.claude/config.json` block for the Claude CLI
+- Both samples assume you run `uv run s3-vectors-mcp serve` and override secrets via your shell profile
 
 ## Available Tools
 
@@ -314,6 +353,9 @@ uv sync --dev
 # Run linting
 uv run ruff check
 uv run ruff format --check
+
+# Run the test suite
+uv run pytest
 ```
 
 ### Contributing
