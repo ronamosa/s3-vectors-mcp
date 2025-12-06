@@ -155,7 +155,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         update_env_from_args(args)
         if getattr(args, "log_level", None):
             os.environ["S3VECTORS_LOG_LEVEL"] = args.log_level
-        serve(args.transport)
+        serve(args.transport, args.log_level)
         return 0
 
     if args.command == "put":

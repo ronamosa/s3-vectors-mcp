@@ -44,18 +44,19 @@ from .config import (
 )
 
 # Configure logging
-def _determine_log_level() -> int:
-    level_name = os.getenv("S3VECTORS_LOG_LEVEL", "INFO").upper()
-    return getattr(logging, level_name, logging.INFO)
+def configure_logging(level_name: Optional[str] = None) -> None:
+    resolved = (level_name or os.getenv("S3VECTORS_LOG_LEVEL", "INFO")).upper()
+    level = getattr(logging, resolved, logging.INFO)
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.StreamHandler(sys.stderr),
+        ],
+        force=True,
+    )
 
 
-logging.basicConfig(
-    level=_determine_log_level(),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stderr),
-    ],
-)
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("S3 Vectors")
@@ -452,8 +453,9 @@ async def s3vectors_query(
         return error_result
 
 
-def serve(transport: str = "stdio") -> None:
+def serve(transport: str = "stdio", log_level: Optional[str] = None) -> None:
     """Start the S3 Vectors MCP server with the specified transport."""
+    configure_logging(log_level)
     logger.info("Starting S3 Vectors MCP Server...")
     logger.info(f"Using transport: {transport}")
 
@@ -498,9 +500,14 @@ Examples:
         nargs="?",
         help="Transport type to use (default: stdio)",
     )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Override server log level",
+    )
 
     args = parser.parse_args()
-    serve(args.transport)
+    serve(args.transport, args.log_level)
 
 
 if __name__ == "__main__":
