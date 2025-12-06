@@ -141,13 +141,14 @@ async def ensure_index_exists(
     create_if_missing: bool,
     context: Optional[Context],
 ) -> None:
+    vector_service = S3VectorService(session, settings.region, debug=False)
     client = session.client("s3vectors")
     try:
         await anyio.to_thread.run_sync(
-            lambda: client.describe_index(
-                vectorBucketName=settings.bucket_name,
-                indexName=settings.index_name,
-            )
+            lambda: vector_service.get_index(
+                settings.bucket_name,
+                settings.index_name,
+            ),
         )
         return
     except Exception as exc:
