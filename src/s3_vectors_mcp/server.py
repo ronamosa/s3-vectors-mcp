@@ -30,16 +30,26 @@ import logging
 import os
 import sys
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import boto3
 from mcp.server.fastmcp import FastMCP
 from s3vectors.core.services import BedrockService, S3VectorService
 from s3vectors.utils.config import get_region
+from .config import (
+    MissingSettingError,
+    Settings,
+    settings_from_env_with_overrides,
+)
 
 # Configure logging
+def _determine_log_level() -> int:
+    level_name = os.getenv("S3VECTORS_LOG_LEVEL", "INFO").upper()
+    return getattr(logging, level_name, logging.INFO)
+
+
 logging.basicConfig(
-    level=logging.ERROR,
+    level=_determine_log_level(),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(sys.stderr),
@@ -47,39 +57,61 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Create an MCP server
 mcp = FastMCP("S3 Vectors")
 
-
-def get_aws_session(profile_name: Optional[str] = None) -> boto3.Session:
-    """Create AWS session with optional profile."""
-    if profile_name:
-        return boto3.Session(profile_name=profile_name)
-    else:
-        return boto3.Session()
+MAX_TOP_K = 1000
 
 
-def get_env_or_param(param_value: Optional[str], env_var: str, param_name: str) -> str:
-    """Get value from parameter or environment variable, with validation."""
-    if param_value:
-        return param_value
-
-    env_value = os.getenv(env_var)
-    if env_value:
-        return env_value
-
-    raise ValueError(
-        f"{param_name} must be provided either as parameter or via {env_var} environment variable"
-    )
+_SESSION_CACHE: Dict[Tuple[str, str], boto3.Session] = {}
 
 
-def get_optional_env_or_param(
-    param_value: Optional[str], env_var: str
+def get_cached_session(
+    profile_name: Optional[str], region: Optional[str]
+) -> boto3.Session:
+    """Cache boto3 sessions per profile/region combination."""
+    key = (profile_name or "", region or "")
+    if key not in _SESSION_CACHE:
+        session_kwargs = {}
+        if profile_name:
+            session_kwargs["profile_name"] = profile_name
+        if region:
+            session_kwargs["region_name"] = region
+        _SESSION_CACHE[key] = boto3.Session(**session_kwargs)
+    return _SESSION_CACHE[key]
+
+
+def resolve_settings(**overrides) -> Settings:
+    """Resolve settings using overrides with environment fallback."""
+    try:
+        settings = settings_from_env_with_overrides(**overrides)
+    except MissingSettingError as exc:
+        raise ValueError(str(exc))
+
+    if not settings.region:
+        settings = settings.with_overrides(region=get_region())
+
+    return settings
+
+
+def validate_text_field(value: str, field_name: str) -> None:
+    if not value or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty string")
+
+
+def validate_top_k(value: int) -> None:
+    if not 1 <= value <= MAX_TOP_K:
+        raise ValueError(f"top_k must be between 1 and {MAX_TOP_K}")
+
+
+def serialize_filter_expression(
+    filter_expr: Optional[Dict[str, Any]]
 ) -> Optional[str]:
-    """Get optional value from parameter or environment variable."""
-    if param_value:
-        return param_value
-    return os.getenv(env_var)
+    if filter_expr is None:
+        return None
+    try:
+        return json.dumps(filter_expr)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("filter_expr must be JSON-serializable") from exc
 
 
 @mcp.tool()
@@ -87,6 +119,12 @@ def s3vectors_put(
     text: str,
     vector_id: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
+    bucket_name: Optional[str] = None,
+    index_name: Optional[str] = None,
+    model_id: Optional[str] = None,
+    region: Optional[str] = None,
+    profile: Optional[str] = None,
+    dimensions: Optional[int] = None,
 ) -> str:
     """
     Embed text and store as vector in S3 Vectors.
@@ -106,33 +144,37 @@ def s3vectors_put(
 
     Returns:
         JSON string with operation result
+        bucket_name: Optional override for S3 bucket
+        index_name: Optional override for index name
+        model_id: Optional override for embedding model
+        region: Optional AWS region override
+        profile: Optional AWS profile override
+        dimensions: Optional override for embedding dimensions
     """
     logger.info(
         f"s3vectors_put called with text_length={len(text)}, vector_id={vector_id}, has_metadata={metadata is not None}"
     )
 
     try:
-        # Get required parameters from env vars
-        bucket_name = get_env_or_param(
-            None, "S3VECTORS_BUCKET_NAME", "S3VECTORS_BUCKET_NAME"
+        validate_text_field(text, "text")
+
+        settings = resolve_settings(
+            bucket_name=bucket_name,
+            index_name=index_name,
+            model_id=model_id,
+            region=region,
+            profile=profile,
+            dimensions=dimensions,
         )
-        idx_name = get_env_or_param(
-            None, "S3VECTORS_INDEX_NAME", "S3VECTORS_INDEX_NAME"
-        )
-        mdl_id = get_env_or_param(None, "S3VECTORS_MODEL_ID", "S3VECTORS_MODEL_ID")
 
         logger.info(
-            f"Configuration: bucket={bucket_name}, index={idx_name}, model={mdl_id}"
-        )
-
-        # Get optional parameters
-        aws_region = get_optional_env_or_param(None, "S3VECTORS_REGION") or get_region()
-        aws_profile = get_optional_env_or_param(None, "S3VECTORS_PROFILE")
-        dimensions_str = get_optional_env_or_param(None, "S3VECTORS_DIMENSIONS")
-        dimensions = int(dimensions_str) if dimensions_str else None
-
-        logger.info(
-            f"Optional config: region={aws_region}, profile={aws_profile}, dimensions={dimensions}"
+            "Configuration resolved bucket=%s index=%s model=%s region=%s profile=%s dims=%s",
+            settings.bucket_name,
+            settings.index_name,
+            settings.model_id,
+            settings.region,
+            settings.profile,
+            settings.dimensions,
         )
 
         # Set defaults
@@ -145,20 +187,24 @@ def s3vectors_put(
 
         # Initialize AWS session and services
         logger.info("Initializing AWS session and services...")
-        session = get_aws_session(aws_profile)
-        bedrock_service = BedrockService(session, aws_region, debug=False)
-        s3vector_service = S3VectorService(session, aws_region, debug=False)
+        session = get_cached_session(settings.profile, settings.region)
+        bedrock_service = BedrockService(session, settings.region, debug=False)
+        s3vector_service = S3VectorService(session, settings.region, debug=False)
 
         # Generate embedding
-        logger.info(f"Generating embedding for text with model {mdl_id}...")
-        embedding = bedrock_service.embed_text(mdl_id, text, dimensions)
+        logger.info(
+            "Generating embedding for text with model %s...", settings.model_id
+        )
+        embedding = bedrock_service.embed_text(
+            settings.model_id, text, settings.dimensions
+        )
         logger.info(f"Generated embedding with {len(embedding)} dimensions")
 
         # Store vector
         logger.info("Storing vector in S3 Vectors...")
         result_vector_id = s3vector_service.put_vector(
-            bucket_name=bucket_name,
-            index_name=idx_name,
+            bucket_name=settings.bucket_name,
+            index_name=settings.index_name,
             vector_id=vector_id,
             embedding=embedding,
             metadata=metadata,
@@ -169,11 +215,11 @@ def s3vectors_put(
         result = {
             "success": True,
             "vector_id": result_vector_id,
-            "bucket": bucket_name,
-            "index": idx_name,
-            "model_id": mdl_id,
-            "region": aws_region,
-            "profile": aws_profile,
+            "bucket": settings.bucket_name,
+            "index": settings.index_name,
+            "model_id": settings.model_id,
+            "region": settings.region,
+            "profile": settings.profile,
             "text_length": len(text),
             "embedding_dimensions": len(embedding),
             "metadata": metadata,
@@ -195,6 +241,12 @@ def s3vectors_query(
     filter_expr: Optional[Dict[str, Any]] = None,
     return_metadata: bool = True,
     return_distance: bool = False,
+    bucket_name: Optional[str] = None,
+    index_name: Optional[str] = None,
+    model_id: Optional[str] = None,
+    region: Optional[str] = None,
+    profile: Optional[str] = None,
+    dimensions: Optional[int] = None,
 ) -> str:
     """
     Query for similar vectors in S3 Vectors.
@@ -257,50 +309,53 @@ def s3vectors_query(
 
     Returns:
         JSON string with query results
+        bucket_name/index_name/model_id/region/profile/dimensions: Optional overrides
     """
     logger.info(
         f"s3vectors_query called with query_text_length={len(query_text)}, top_k={top_k}, has_filter={filter_expr is not None}, return_metadata={return_metadata}, return_distance={return_distance}"
     )
 
     try:
-        # Get required parameters from env vars
-        bucket_name = get_env_or_param(
-            None, "S3VECTORS_BUCKET_NAME", "S3VECTORS_BUCKET_NAME"
+        validate_text_field(query_text, "query_text")
+        validate_top_k(top_k)
+        settings = resolve_settings(
+            bucket_name=bucket_name,
+            index_name=index_name,
+            model_id=model_id,
+            region=region,
+            profile=profile,
+            dimensions=dimensions,
         )
-        idx_name = get_env_or_param(
-            None, "S3VECTORS_INDEX_NAME", "S3VECTORS_INDEX_NAME"
-        )
-        mdl_id = get_env_or_param(None, "S3VECTORS_MODEL_ID", "S3VECTORS_MODEL_ID")
 
         logger.info(
-            f"Configuration: bucket={bucket_name}, index={idx_name}, model={mdl_id}"
-        )
-
-        # Get optional parameters
-        aws_region = get_optional_env_or_param(None, "S3VECTORS_REGION") or get_region()
-        aws_profile = get_optional_env_or_param(None, "S3VECTORS_PROFILE")
-        dimensions_str = get_optional_env_or_param(None, "S3VECTORS_DIMENSIONS")
-        dimensions = int(dimensions_str) if dimensions_str else None
-
-        logger.info(
-            f"Optional config: region={aws_region}, profile={aws_profile}, dimensions={dimensions}"
+            "Configuration resolved bucket=%s index=%s model=%s region=%s profile=%s dims=%s",
+            settings.bucket_name,
+            settings.index_name,
+            settings.model_id,
+            settings.region,
+            settings.profile,
+            settings.dimensions,
         )
 
         # Initialize AWS session and services
         logger.info("Initializing AWS session and services...")
-        session = get_aws_session(aws_profile)
-        bedrock_service = BedrockService(session, aws_region, debug=False)
-        s3vector_service = S3VectorService(session, aws_region, debug=False)
+        session = get_cached_session(settings.profile, settings.region)
+        bedrock_service = BedrockService(session, settings.region, debug=False)
+        s3vector_service = S3VectorService(session, settings.region, debug=False)
 
         # Generate query embedding
-        logger.info(f"Generating query embedding for text with model {mdl_id}...")
-        query_embedding = bedrock_service.embed_text(mdl_id, query_text, dimensions)
+        logger.info(
+            "Generating query embedding for text with model %s...", settings.model_id
+        )
+        query_embedding = bedrock_service.embed_text(
+            settings.model_id, query_text, settings.dimensions
+        )
         logger.info(f"Generated query embedding with {len(query_embedding)} dimensions")
 
         # Prepare query parameters
         query_params = {
-            "bucket_name": bucket_name,
-            "index_name": idx_name,
+            "bucket_name": settings.bucket_name,
+            "index_name": settings.index_name,
             "query_embedding": query_embedding,
             "k": top_k,
             "return_metadata": return_metadata,
@@ -308,9 +363,8 @@ def s3vectors_query(
         }
 
         # Add optional parameters if provided
-        if filter_expr:
-            # Convert dict to JSON string as S3VectorService expects string
-            filter_expr_str = json.dumps(filter_expr)
+        filter_expr_str = serialize_filter_expression(filter_expr)
+        if filter_expr_str:
             query_params["filter_expr"] = filter_expr_str
 
         logger.info(f"Query parameters: {query_params}")
@@ -343,11 +397,11 @@ def s3vectors_query(
         response = {
             "success": True,
             "query_text": query_text,
-            "bucket": bucket_name,
-            "index": idx_name,
-            "model_id": mdl_id,
-            "region": aws_region,
-            "profile": aws_profile,
+            "bucket": settings.bucket_name,
+            "index": settings.index_name,
+            "model_id": settings.model_id,
+            "region": settings.region,
+            "profile": settings.profile,
             "top_k": top_k,
             "filter": filter_expr,
             "return_metadata": return_metadata,
