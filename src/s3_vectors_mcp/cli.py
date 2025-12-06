@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 
 import anyio
 
-from .server import serve, s3vectors_put, s3vectors_query
+from .server import serve, s3vectors_ingest_pdf, s3vectors_put, s3vectors_query
 
 CONFIG_ARGS = [
     ("bucket_name", "S3VECTORS_BUCKET_NAME", "S3 bucket containing vector data"),
@@ -108,6 +108,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_config_arguments(query_parser)
 
+    # ingest command
+    ingest_parser = subparsers.add_parser(
+        "ingest-pdf", help="Extract, embed, and upload a local PDF"
+    )
+    ingest_parser.add_argument("--pdf-path", required=True, help="Path to the PDF")
+    ingest_parser.add_argument("--topic", required=True, help="Topic label for metadata")
+    ingest_parser.add_argument(
+        "--vault-root",
+        help="Root folder for relative metadata paths (defaults to PDF directory)",
+    )
+    ingest_parser.add_argument(
+        "--chunk-size", type=int, default=500, help="Words per chunk (default 500)"
+    )
+    ingest_parser.add_argument(
+        "--chunk-overlap",
+        type=int,
+        default=50,
+        help="Word overlap between chunks (default 50)",
+    )
+    ingest_parser.add_argument(
+        "--create-index",
+        action="store_true",
+        help="Create the index if it does not exist",
+    )
+    ingest_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=200,
+        help="Number of vectors per upload batch",
+    )
+    add_config_arguments(ingest_parser)
+
     return parser
 
 
@@ -147,6 +179,26 @@ async def run_query(args: argparse.Namespace) -> int:
     return 0 if result.get("success") else 1
 
 
+async def run_ingest(args: argparse.Namespace) -> int:
+    result = await s3vectors_ingest_pdf(
+        pdf_path=args.pdf_path,
+        topic=args.topic,
+        vault_root=args.vault_root,
+        chunk_size=args.chunk_size,
+        chunk_overlap=args.chunk_overlap,
+        bucket_name=args.bucket_name,
+        index_name=args.index_name,
+        model_id=args.model_id,
+        region=args.region,
+        profile=args.profile,
+        dimensions=args.dimensions,
+        create_index=args.create_index,
+        batch_size=args.batch_size,
+    )
+    print(json.dumps(result, indent=2))
+    return 0 if result.get("success") else 1
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -163,6 +215,9 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.command == "query":
         return anyio.run(run_query, args)
+
+    if args.command == "ingest-pdf":
+        return anyio.run(run_ingest, args)
 
     parser.error("Unknown command")
     return 1
