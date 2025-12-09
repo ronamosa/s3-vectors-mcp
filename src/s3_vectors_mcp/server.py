@@ -170,8 +170,9 @@ async def ensure_index_exists(
         lambda: client.create_index(
             vectorBucketName=settings.bucket_name,
             indexName=settings.index_name,
-            dimensionCount=settings.dimensions,
-            vectorDataType="float32",
+            dataType="float32",
+            dimension=settings.dimensions,
+            distanceMetric="COSINE",
         )
     )
 
