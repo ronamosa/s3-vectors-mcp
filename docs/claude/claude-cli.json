@@ -3,8 +3,14 @@
     "s3vectors": {
       "command": "/PATH/TO/.mcp/servers/s3vectors/serve.sh",
       "args": [],
-      "env": {}
+      "env": {
+        "S3VECTORS_BUCKET_NAME": "my-vectors-bucket",
+        "S3VECTORS_INDEX_NAME": "my-default-index",
+        "S3VECTORS_MODEL_ID": "amazon.titan-embed-text-v2:0",
+        "S3VECTORS_REGION": "us-east-1",
+        "S3VECTORS_DIMENSIONS": "1024",
+        "AWS_PROFILE": "default"
+      }
     }
   }
 }
-

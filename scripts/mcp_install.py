@@ -122,11 +122,23 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
 ENV_FILE="${{SCRIPT_DIR}}/.env"
 
+# Source .env defaults, but do not overwrite existing environment variables.
+# This allows Claude config (claude.json) to take precedence over the .env file.
 if [ -f "${{ENV_FILE}}" ]; then
-  # shellcheck disable=SC1090
-  set -a
-  source "${{ENV_FILE}}"
-  set +a
+  while IFS='=' read -r key value || [ -n "$key" ]; do
+    # Skip comments and empty lines
+    [[ $key =~ ^#.*$ ]] || [ -z "$key" ] && continue
+    
+    # If variable is NOT set in current environment, export it from .env
+    if [ -z "${{!key+x}}" ]; then
+       # Remove potential surrounding quotes from value
+       value="${{value%\\"}}"
+       value="${{value#\\"}}"
+       value="${{value%\\'}}"
+       value="${{value#\\'}}"
+       export "$key=$value"
+    fi
+  done < "${{ENV_FILE}}"
 fi
 
 TRANSPORT="${{S3VECTORS_TRANSPORT:-{transport_quoted}}}"
@@ -183,6 +195,7 @@ def main() -> None:
     print()
     print("Next steps:")
     print(f"  1. Edit {install_dir / '.env'} with your AWS + S3 vectors settings.")
+    print("     (Or leave .env empty and configure via Claude's config file if preferred)")
     print(
         "  2. In Claude Code/Desktop, point the MCP server command at "
         f"{wrapper_path} (see claude-code.json for a ready-to-copy block)."
@@ -191,4 +204,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -159,13 +159,23 @@ uv run s3-vectors-mcp ingest-pdf \
   --index-name design-notes
 ```
 
-### Configuration Precedence
+### Configuration Precedence & Multiple Indexes
 
-1. CLI arguments (`--bucket-name`, `--model-id`, etc.)
-2. Environment variables (`S3VECTORS_*`)
-3. Defaults (region detection via AWS config, INFO log level)
+1. **Tool Parameters**: Arguments passed at runtime (e.g. `index_name="special-index"`).
+2. **Environment Variables**: Variables in Claude's config (`~/.claude.json`) or passed via shell.
+3. **.env File**: Defaults loaded from `~/.mcp/servers/s3vectors/.env` (if not already set in environment).
+4. **Defaults**: Region detection, standard timeouts, etc.
 
-This makes it easy to keep multiple Claude Code workspaces pointed at different datasets without constantly rewriting env files.
+**Best Practice for Multiple Indexes:**
+Set your *common* defaults (bucket, model, region, profile) in your configuration (Claude config or `.env`), then override just the `index_name` when calling tools.
+
+```python
+# Example tool call overriding the default index
+s3vectors_query(
+  query_text="foo",
+  index_name="my-special-index"  # Overrides S3VECTORS_INDEX_NAME
+)
+```
 
 ### Development Mode
 
