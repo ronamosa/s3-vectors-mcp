@@ -28,9 +28,9 @@ import argparse
 import json
 import logging
 import os
-from pathlib import Path
 import sys
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import anyio
@@ -38,6 +38,7 @@ import boto3
 from mcp.server.fastmcp import Context, FastMCP
 from s3vectors.core.services import BedrockService, S3VectorService
 from s3vectors.utils.config import get_region
+from . import get_version
 from .config import (
     MissingSettingError,
     Settings,
@@ -64,9 +65,6 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP("S3 Vectors")
 
 MAX_TOP_K = 1000
-
-# Package version for logging/visibility
-PACKAGE_VERSION = "0.1.3"
 
 
 _SESSION_CACHE: Dict[Tuple[str, str], boto3.Session] = {}
@@ -710,7 +708,7 @@ async def s3vectors_ingest_pdf(
 def serve(transport: str = "stdio", log_level: Optional[str] = None) -> None:
     """Start the S3 Vectors MCP server with the specified transport."""
     configure_logging(log_level)
-    logger.info(f"Starting S3 Vectors MCP Server v{PACKAGE_VERSION}...")
+    logger.info(f"Starting S3 Vectors MCP Server v{get_version()}...")
     logger.info(f"Using transport: {transport}")
 
     # Log environment variables for debugging
