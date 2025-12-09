@@ -1,20 +1,9 @@
 {
   "mcpServers": {
     "s3vectors": {
-      "command": "uv",
-      "args": [
-        "run",
-        "s3-vectors-mcp",
-        "serve",
-        "--transport",
-        "stdio"
-      ],
-      "env": {
-        "S3VECTORS_BUCKET_NAME": "YOUR_BUCKET",
-        "S3VECTORS_INDEX_NAME": "YOUR_INDEX",
-        "S3VECTORS_MODEL_ID": "amazon.titan-embed-text-v2:0",
-        "S3VECTORS_REGION": "us-east-1"
-      }
+      "command": "/PATH/TO/.mcp/servers/s3vectors/serve.sh",
+      "args": [],
+      "env": {}
     }
   }
 }
