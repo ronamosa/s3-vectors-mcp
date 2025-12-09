@@ -102,6 +102,24 @@ def validate_text_field(value: str, field_name: str) -> None:
         raise ValueError(f"{field_name} must be a non-empty string")
 
 
+def embed_text_with_compat(
+    bedrock_service: BedrockService, model_id: str, text: str, dimensions: Optional[int]
+) -> List[float]:
+    """
+    Call the Bedrock embedding helper while remaining compatible with older
+    s3vectors-embed-cli releases that might use different method names.
+    """
+    if hasattr(bedrock_service, "embed_text"):
+        return bedrock_service.embed_text(model_id, text, dimensions)
+    if hasattr(bedrock_service, "embed_text_sync"):
+        # Some older builds exposed a sync-only API
+        return bedrock_service.embed_text_sync(model_id, text, dimensions)
+    raise ValueError(
+        "BedrockService missing embed_text; upgrade s3vectors-embed-cli to >=0.1.1 "
+        "(reinstall with `uv tool install --force .`)."
+    )
+
+
 def validate_top_k(value: int) -> None:
     if not 1 <= value <= MAX_TOP_K:
         raise ValueError(f"top_k must be between 1 and {MAX_TOP_K}")
@@ -195,7 +213,8 @@ async def embed_chunks(
             message="Generating embeddings",
         )
         embedding = await anyio.to_thread.run_sync(
-            bedrock_service.embed_text,
+            embed_text_with_compat,
+            bedrock_service,
             settings.model_id,
             chunk.text[:4000],
             settings.dimensions,
@@ -313,7 +332,8 @@ async def s3vectors_put(
         await send_info(context, "Generating embedding with Bedrock")
         await send_progress(context, 30, message="Generating embedding")
         embedding = await anyio.to_thread.run_sync(
-            bedrock_service.embed_text,
+            embed_text_with_compat,
+            bedrock_service,
             settings.model_id,
             text,
             settings.dimensions,
@@ -472,7 +492,8 @@ async def s3vectors_query(
         await send_info(context, "Generating query embedding with Bedrock")
         await send_progress(context, 20, message="Generating query embedding")
         query_embedding = await anyio.to_thread.run_sync(
-            bedrock_service.embed_text,
+            embed_text_with_compat,
+            bedrock_service,
             settings.model_id,
             query_text,
             settings.dimensions,

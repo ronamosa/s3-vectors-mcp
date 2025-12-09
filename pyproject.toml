@@ -9,7 +9,8 @@ keywords = ["mcp", "s3vectors", "aws", "bedrock", "vector", "embedding"]
 license = { text = "MIT" }
 dependencies = [
     "mcp>=1.12.2",
-    "s3vectors-embed-cli>=0.1.1",
+    # embed_text is required; older releases may not expose it
+    "s3vectors-embed-cli>=0.1.2",
     "PyPDF2>=3.0.1",
 ]
 

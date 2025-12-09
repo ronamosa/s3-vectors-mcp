@@ -603,7 +603,7 @@ dev = [
 requires-dist = [
     { name = "mcp", specifier = ">=1.12.2" },
     { name = "pypdf2", specifier = ">=3.0.1" },
-    { name = "s3vectors-embed-cli", specifier = ">=0.1.1" },
+    { name = "s3vectors-embed-cli", specifier = ">=0.1.2" },
 ]
 
 [package.metadata.requires-dev]
@@ -627,7 +627,7 @@ wheels = [
 
 [[package]]
 name = "s3vectors-embed-cli"
-version = "0.1.1"
+version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "boto3" },
@@ -636,9 +636,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/98/54/df0d1664f18b98e3a37e1c115870abc2a95180248c92dddfdd60f498d3d5/s3vectors_embed_cli-0.1.1.tar.gz", hash = "sha256:75a11a019989020c1b062a94bc078fa6e623c6b8ed5e1e1527365557cce63c3c", size = 33028, upload-time = "2025-07-24T01:28:27.619Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/04/40/5ce5e3b1ad9a60ba3134985f2568739cdae1f6f3a58208ddbf66fa39797a/s3vectors_embed_cli-0.2.1.tar.gz", hash = "sha256:6da6c69543bfa63bac2476fd443d0a9517a5a6f69d0ce879d788e5b39137905d", size = 50895, upload-time = "2025-10-16T15:27:00.361Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/76/fb/10afaf042cf62d62ffc29b20b249c947c27e62a2b675ef8fda969fb6877e/s3vectors_embed_cli-0.1.1-py3-none-any.whl", hash = "sha256:877875dd89b7b9780033fe5f93c66dcea48f3f84b90a7099d28d8c53181fa256", size = 39472, upload-time = "2025-07-24T01:28:26.411Z" },
+    { url = "https://files.pythonhosted.org/packages/52/56/55993fc0b17656885197b3ec8a6f5883eddf1446f90e87d35fd1d8c666a3/s3vectors_embed_cli-0.2.1-py3-none-any.whl", hash = "sha256:6dc3fb4d7bfd19e4dae380ce2e2dddde6ae006766bc0946808cfe83d8db0be43", size = 49259, upload-time = "2025-10-16T15:26:59.384Z" },
 ]
 
 [[package]]
