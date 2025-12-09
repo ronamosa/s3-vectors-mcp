@@ -50,6 +50,46 @@ uv sync
 pip install -e .
 ```
 
+### Claude-first Make Install
+
+Need a stable command path that Claude Code/Desktop can launch without
+referencing your shell `PATH`? Run the bundled installer:
+
+```bash
+git clone https://github.com/ronamosa/s3-vectors-mcp.git
+cd s3-vectors-mcp
+make install
+```
+
+What `make install` does:
+
+1. Installs/updates the `s3-vectors-mcp` CLI via `uv tool install`.
+2. Creates `~/.mcp/servers/s3vectors/serve.sh`, a wrapper script that loads
+   `~/.mcp/servers/s3vectors/.env` and then launches the server.
+3. Writes `.env` / `.env.example` so you can keep AWS + S3 Vectors secrets out of
+   your Claude config files.
+4. Generates a personalized Claude config snippet at
+   `~/.mcp/servers/s3vectors/claude-code.json` that already points at the wrapper.
+
+After running the installer, edit `~/.mcp/servers/s3vectors/.env` with your bucket,
+index, model, and region, then either:
+
+- Run `claude mcp add s3vectors -- ~/.mcp/servers/s3vectors/serve.sh` (or add
+  `-s user` for a global registration), **or**
+- Copy the generated `claude-code.json` block into Claude Code/Desktop’s MCP
+  settings.
+
+`make uninstall` removes the files under `~/.mcp/servers/s3vectors` if you ever
+want to reset.
+
+### Zero-to-working Claude setup (new machine)
+
+1) `make install` (writes the wrapper + env templates under `~/.mcp/servers/s3vectors`)
+2) Edit `~/.mcp/servers/s3vectors/.env` with your AWS + S3 Vectors settings
+3) Register globally so any project can use it:
+   `claude mcp add s3vectors -s user -- ~/.mcp/servers/s3vectors/serve.sh`
+4) Start Claude and run `/mcp list` (or `/mcp reload`) to confirm `s3vectors` is loaded
+
 ## Configuration
 
 The server uses environment variables for configuration:
@@ -204,10 +244,12 @@ For Claude Desktop, add to your MCP client configuration:
 
 ### Claude Code & Claude CLI Quick Start
 
-- `docs/claude/claude-code.json`: drop-in MCP config for Claude Desktop / Claude Code
-- `docs/claude/claude-cli.json`: sample `.claude/config.json` block for the Claude CLI
-- Both samples assume you run `uv run s3-vectors-mcp serve` and override secrets via your shell profile
-- `docs/claude/claude-mcp-add.md`: step-by-step instructions for `claude mcp add ...` so you can register this server with Claude CLI in seconds
+- `docs/claude/claude-code.json`: drop-in MCP config for Claude Desktop / Claude Code.
+  Update the `"command"` field to point at your local wrapper
+  (`~/.mcp/servers/s3vectors/serve.sh` if you used `make install`).
+- `docs/claude/claude-cli.json`: sample `.claude/config.json` block for the Claude CLI.
+- `docs/claude/claude-mcp-add.md`: step-by-step instructions for `claude mcp add ...`
+  including the new wrapper-based workflow.
 
 #### One-liner Claude CLI registration
 
@@ -430,6 +472,12 @@ aws bedrock list-foundation-models --region us-east-1
 ```
 
 **S3 Vectors Setup**: Verify your S3 bucket and vector index exist and are properly configured.
+
+**MCP server not showing in Claude**:
+- If you registered without `-s user`, the server is only visible when Claude’s current project directory matches where you ran `claude mcp add`. Use `claude mcp add s3vectors -s user -- ~/.mcp/servers/s3vectors/serve.sh` to make it global.
+- Ensure `~/.mcp/servers/s3vectors/serve.sh` is executable and the `.env` file exists with the required `S3VECTORS_*` values.
+- Run `/mcp reload` in Claude, then `/mcp list` to verify the server is active.
+- If the server fails to spawn, check Claude’s debug logs or Developer Tools console for a “Failed to spawn” message indicating a bad path.
 
 ### Debug Mode
 
