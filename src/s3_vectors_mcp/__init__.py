@@ -6,5 +6,5 @@ for embedding and querying vector data using Amazon Bedrock models.
 
 from .server import serve
 
-__version__ = "0.1.0"
+__version__ = "0.1.3"
 __all__ = ["serve"]
