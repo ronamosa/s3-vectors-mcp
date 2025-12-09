@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -113,6 +114,8 @@ def write_wrapper_script(
     Write a small shell wrapper that sources .env then launches the CLI.
     """
     wrapper_path = install_dir / "serve.sh"
+    cli_quoted = shlex.quote(str(cli_path))
+    transport_quoted = shlex.quote(str(transport))
     wrapper_template = f"""#!/usr/bin/env bash
 set -euo pipefail
 
@@ -126,8 +129,8 @@ if [ -f "${{ENV_FILE}}" ]; then
   set +a
 fi
 
-TRANSPORT="${{S3VECTORS_TRANSPORT:-{transport}}}"
-exec "{cli_path}" serve --transport "${{TRANSPORT}}" "$@"
+TRANSPORT="${{S3VECTORS_TRANSPORT:-{transport_quoted}}}"
+exec {cli_quoted} serve --transport "${{TRANSPORT}}" "$@"
 """
     wrapper_path.write_text(wrapper_template, encoding="utf-8")
     wrapper_path.chmod(wrapper_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
