@@ -65,6 +65,9 @@ mcp = FastMCP("S3 Vectors")
 
 MAX_TOP_K = 1000
 
+# Package version for logging/visibility
+PACKAGE_VERSION = "0.1.3"
+
 
 _SESSION_CACHE: Dict[Tuple[str, str], boto3.Session] = {}
 
@@ -707,7 +710,7 @@ async def s3vectors_ingest_pdf(
 def serve(transport: str = "stdio", log_level: Optional[str] = None) -> None:
     """Start the S3 Vectors MCP server with the specified transport."""
     configure_logging(log_level)
-    logger.info("Starting S3 Vectors MCP Server...")
+    logger.info(f"Starting S3 Vectors MCP Server v{PACKAGE_VERSION}...")
     logger.info(f"Using transport: {transport}")
 
     # Log environment variables for debugging
