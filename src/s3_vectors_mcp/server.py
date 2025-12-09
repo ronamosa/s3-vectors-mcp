@@ -107,17 +107,65 @@ def embed_text_with_compat(
 ) -> List[float]:
     """
     Call the Bedrock embedding helper while remaining compatible with older
-    s3vectors-embed-cli releases that might use different method names.
+    s3vectors-embed-cli releases that might use different method names, or newer
+    releases that changed the API surface.
     """
     if hasattr(bedrock_service, "embed_text"):
         return bedrock_service.embed_text(model_id, text, dimensions)
     if hasattr(bedrock_service, "embed_text_sync"):
         # Some older builds exposed a sync-only API
         return bedrock_service.embed_text_sync(model_id, text, dimensions)
-    raise ValueError(
-        "BedrockService missing embed_text; upgrade s3vectors-embed-cli to >=0.1.1 "
-        "(reinstall with `uv tool install --force .`)."
+
+    # Fallback: perform the Bedrock invoke directly for common text models.
+    runtime = getattr(bedrock_service, "bedrock_runtime", None)
+    if runtime is None:
+        raise ValueError(
+            "BedrockService missing embed_text and bedrock_runtime; upgrade s3vectors-embed-cli."
+        )
+
+    if model_id.startswith("amazon.titan-embed-text-v2"):
+        body_dict = {
+            "inputText": text,
+            "normalize": True,
+            "embeddingTypes": ["float"],
+        }
+        if dimensions:
+            body_dict["dimensions"] = dimensions
+    elif model_id.startswith("amazon.titan-embed-text-v1"):
+        body_dict = {"inputText": text}
+    elif model_id.startswith("cohere.embed"):
+        body_dict = {
+            "texts": [text],
+            "input_type": "search_document",
+            "embedding_types": ["float"],
+        }
+    else:
+        raise ValueError(
+            "BedrockService missing embed_text; upgrade s3vectors-embed-cli or use a supported model."
+        )
+
+    response = runtime.invoke_model(
+        modelId=model_id,
+        body=json.dumps(body_dict),
+        contentType="application/json",
     )
+    response_body = json.loads(response["body"].read())
+
+    if model_id.startswith("amazon.titan-embed-text-v2"):
+        if "embeddingsByType" in response_body:
+            return response_body["embeddingsByType"].get("float", [])
+        return response_body.get("embedding", [])
+    if model_id.startswith("amazon.titan-embed-text-v1"):
+        return response_body["embedding"]
+    if model_id.startswith("cohere.embed"):
+        embeddings = response_body.get("embeddings", {})
+        if isinstance(embeddings, dict) and "float" in embeddings:
+            return embeddings["float"][0]
+        if isinstance(embeddings, list) and embeddings:
+            return embeddings[0]
+        return response_body.get("embedding", [])
+
+    raise ValueError("Unhandled model response parsing")
 
 
 def validate_top_k(value: int) -> None:
