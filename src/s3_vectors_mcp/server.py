@@ -166,13 +166,15 @@ async def ensure_index_exists(
         context,
         f"Creating index {settings.index_name} (bucket {settings.bucket_name})",
     )
+    # AWS API expects lowercase distance metric names (cosine, euclidean).
+    # Using uppercase was causing ValidationException.
     await anyio.to_thread.run_sync(
         lambda: client.create_index(
             vectorBucketName=settings.bucket_name,
             indexName=settings.index_name,
             dataType="float32",
             dimension=settings.dimensions,
-            distanceMetric="COSINE",
+            distanceMetric="cosine",
         )
     )
 
