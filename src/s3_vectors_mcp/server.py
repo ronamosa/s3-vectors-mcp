@@ -393,12 +393,13 @@ async def s3vectors_put(
         # Store vector
         await send_info(context, "Storing vector in S3 Vectors")
         result_vector_id = await anyio.to_thread.run_sync(
-            s3vector_service.put_vector,
-            bucket_name=settings.bucket_name,
-            index_name=settings.index_name,
-            vector_id=vector_id,
-            embedding=embedding,
-            metadata=metadata,
+            lambda: s3vector_service.put_vector(
+                bucket_name=settings.bucket_name,
+                index_name=settings.index_name,
+                vector_id=vector_id,
+                embedding=embedding,
+                metadata=metadata,
+            )
         )
         logger.info(f"Successfully stored vector with ID: {result_vector_id}")
         await send_progress(context, 90, message="Vector stored")
@@ -570,8 +571,7 @@ async def s3vectors_query(
 
         # Perform vector search
         search_results = await anyio.to_thread.run_sync(
-            s3vector_service.query_vectors,
-            **query_params,
+            lambda: s3vector_service.query_vectors(**query_params)
         )
         logger.info(f"Query completed successfully. Raw results: {search_results}")
         await send_progress(context, 80, message="Query completed")
